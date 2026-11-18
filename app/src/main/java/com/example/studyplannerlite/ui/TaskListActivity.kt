@@ -32,7 +32,9 @@ class TaskListActivity : AppCompatActivity() {
         setContentView(R.layout.activity_task_list)
 
         taskDao = AppDatabase.getInstance(this).taskDao()
-        settingsManager = SettingsManager(getSharedPreferences(SettingsManager.PREFS_NAME, Context.MODE_PRIVATE))
+        settingsManager = SettingsManager(
+            getSharedPreferences(SettingsManager.PREFS_NAME, Context.MODE_PRIVATE)
+        )
 
         taskListView = findViewById(R.id.taskListView)
         emptyText = findViewById(R.id.emptyText)
@@ -46,21 +48,78 @@ class TaskListActivity : AppCompatActivity() {
             onDoneChange = { task, isDone -> updateDone(task, isDone) }
         )
         taskListView.adapter = adapter
+
         taskListView.setOnItemClickListener { _, _, position, _ ->
             val task = adapter.getItem(position)
-            startActivity(Intent(this, AddEditTaskActivity::class.java)
-                .putExtra(AddEditTaskActivity.EXTRA_TASK_ID, task.id))
+            val intent = Intent(this, AddEditTaskActivity::class.java)
+            intent.putExtra(AddEditTaskActivity.EXTRA_TASK_ID, task.id)
+            startActivity(intent)
         }
 
         addTaskButton.setOnClickListener {
             openTaskEditor(AddEditTaskActivity.NEW_TASK_ID)
         }
         settingsButton.setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            val intent = Intent(this, SettingsActivity::class.java)
+            startActivity(intent)
         }
     }
-}
 
-private fun openTaskEditor(taskId: Int) {
-    startActivity(Intent(this, AddEditTaskActivity::class.java).putExtra(AddEditTaskActivity.EXTRA_TASK_ID, taskId))
+    override fun onResume() {
+        super.onResume()
+        loadTasks()
+    }
+
+    private fun openTaskEditor(taskId: Int) {
+        val intent = Intent(this, AddEditTaskActivity::class.java)
+        intent.putExtra(AddEditTaskActivity.EXTRA_TASK_ID, taskId)
+        startActivity(intent)
+    }
+
+    private fun loadTasks() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val tasks = taskDao.getAllTasks()
+            val sortedTasks = if (settingsManager.getSortOrder() == SettingsManager.SORT_TITLE) {
+                tasks.sortedBy {task -> task.title.lowercase()}
+            }
+            else {
+                tasks.sortedBy {task -> task.deadline}
+            }
+            withContext(Dispatchers.Main) {
+                adapter.updateTasks(sortedTasks)
+                if (sortedTasks.isEmpty()) {
+                    emptyText.visibility = View.VISIBLE
+                }
+                else {
+                    emptyText.visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    private fun deleteTask(task: Task) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            taskDao.delete(task)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(applicationContext, R.string.task_deleted, Toast.LENGTH_SHORT).show()
+                loadTasks()
+            }
+        }
+    }
+
+    private fun updateDone(task: Task, isDone: Boolean) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val updatedTask = Task(
+                id = task.id,
+                title = task.title,
+                description = task.description,
+                deadline = task.deadline,
+                isDone = isDone
+            )
+            taskDao.update(updatedTask)
+            withContext(Dispatchers.Main) {
+                loadTasks()
+            }
+        }
+    }
 }
